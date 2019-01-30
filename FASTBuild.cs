@@ -749,6 +749,10 @@ namespace UnrealBuildTool
 				string PCHToForceInclude = PCHOutputFile.Replace(".pch", "");
 				AddText(string.Format("\t.CompilerOptions = '\"%1\" /Fo\"%2\" /Fp\"{0}\" /Yu\"{1}\" /FI\"{2}\" {3} '\n", PCHOutputFile, PCHIncludeHeader, PCHToForceInclude, OtherCompilerOptions));
 				CompilerOutputExtension = ".cpp.obj";
+				if (InputFile.EndsWith(".c"))
+				{
+					CompilerOutputExtension = ".c.obj";
+				}
 			}
 			else
 			{
@@ -763,6 +767,10 @@ namespace UnrealBuildTool
 					{
 						AddText(string.Format("\t.CompilerOptions = '{0} /Fo\"%2\" \"%1\" '\n", OtherCompilerOptions));
 						CompilerOutputExtension = ".cpp.obj";
+						if (InputFile.EndsWith(".c"))
+						{
+							CompilerOutputExtension = ".c.obj";
+						}
 					}
 					else
 					{
