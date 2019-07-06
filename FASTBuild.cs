@@ -18,7 +18,7 @@ namespace UnrealBuildTool
 		/*---- Configurable User settings ----*/
 
 		// Used to specify a non-standard location for the FBuild.exe, for example if you have not added it to your PATH environment variable.
-		public static string FBuildExePathOverride = "";
+		public static string FBuildExePathOverride = @"C:\FASTBuild\FBuild.exe";
 
 		// Controls network build distribution
 		private bool bEnableDistribution = true;
@@ -102,7 +102,7 @@ namespace UnrealBuildTool
 				if (action.ActionType != ActionType.Compile && action.ActionType != ActionType.Link)
 					continue;
 
-				if (action.CommandPath.Contains("orbis"))
+				if (action.CommandPath.FullName.Contains("orbis"))
 				{
 					BuildType = FBBuildType.PS4;
 					return;
@@ -112,7 +112,7 @@ namespace UnrealBuildTool
 					BuildType = FBBuildType.XBOne;
 					return;
 				}
-				else if (action.CommandPath.Contains("Microsoft")) //Not a great test.
+				else if (action.CommandPath.FullName.Contains("Microsoft")) //Not a great test.
 				{
 					BuildType = FBBuildType.Windows;
 					return;
@@ -122,8 +122,8 @@ namespace UnrealBuildTool
 
 		private bool IsMSVC() { return BuildType == FBBuildType.Windows || BuildType == FBBuildType.XBOne; }
 		private bool IsPS4() { return BuildType == FBBuildType.PS4; }
-		private bool IsXBOnePDBUtil(Action action) { return action.CommandPath.Contains("XboxOnePDBFileUtil.exe"); }
-		private bool IsPS4SymbolTool(Action action) { return action.CommandPath.Contains("PS4SymbolTool.exe"); }
+		private bool IsXBOnePDBUtil(Action action) { return action.CommandPath.FullName.Contains("XboxOnePDBFileUtil.exe"); }
+		private bool IsPS4SymbolTool(Action action) { return action.CommandPath.FullName.Contains("PS4SymbolTool.exe"); }
 		private string GetCompilerName()
 		{
 			switch (BuildType)
@@ -188,7 +188,7 @@ namespace UnrealBuildTool
 			Dictionary<string, string> ParsedCompilerOptions = new Dictionary<string, string>();
 
 			// Make sure we substituted the known environment variables with corresponding BFF friendly imported vars
-			CompilerCommandLine = SubstituteEnvironmentVariables(CompilerCommandLine);
+			//CompilerCommandLine = SubstituteEnvironmentVariables(CompilerCommandLine);
 
 			// Some tricky defines /DTROUBLE=\"\\\" abc  123\\\"\" aren't handled properly by either Unreal or Fastbuild, but we do our best.
 			char[] SpaceChar = { ' ' };
@@ -198,15 +198,24 @@ namespace UnrealBuildTool
 			string PartialToken = "";
 			string ResponseFilePath = "";
 
-			if (RawTokens.Length >= 1 && RawTokens[0].StartsWith("@\"")) //Response files are in 4.13 by default. Changing VCToolChain to not do this is probably better.
+			int RespIndex = -1;
+			for(int i = 0; i < RawTokens.Length; ++i)
 			{
-				string responseCommandline = RawTokens[0];
+				if(RawTokens[i].StartsWith("@\""))
+				{
+					RespIndex = i;
+				}
+			}
+
+			if (RespIndex >= 0) //Response files are in 4.13 by default. Changing VCToolChain to not do this is probably better.
+			{
+				string responseCommandline = RawTokens[RespIndex];
 
 				// If we had spaces inside the response file path, we need to reconstruct the path.
-				for (int i = 1; i < RawTokens.Length; ++i)
-				{
-					responseCommandline += " " + RawTokens[i];
-				}
+				//for (int i = 1; i < RawTokens.Length; ++i)
+				//{
+				//	responseCommandline += " " + RawTokens[i];
+				//}
 
 				ResponseFilePath = responseCommandline.Substring(2, responseCommandline.Length - 3); // bit of a bodge to get the @"response.txt" path...
 				try
@@ -214,7 +223,7 @@ namespace UnrealBuildTool
 					string ResponseFileText = File.ReadAllText(ResponseFilePath);
 
 					// Make sure we substituted the known environment variables with corresponding BFF friendly imported vars
-					ResponseFileText = SubstituteEnvironmentVariables(ResponseFileText);
+					//ResponseFileText = SubstituteEnvironmentVariables(ResponseFileText);
 
 					string[] Separators = { "\n", " ", "\r" };
 					if (File.Exists(ResponseFilePath))
@@ -381,11 +390,11 @@ namespace UnrealBuildTool
 			for (int ActionIndex = 0; ActionIndex < InActions.Count; ActionIndex++)
 			{
 				Action Action = InActions[ActionIndex];
-				foreach (FileItem Item in Action.PrerequisiteItems)
+				foreach (Action RequiredAction in Action.PrerequisiteActions)
 				{
-					if (Item.ProducingAction != null && InActions.Contains(Item.ProducingAction))
+					if (InActions.Contains(RequiredAction))
 					{
-						int DepIndex = InActions.IndexOf(Item.ProducingAction);
+						int DepIndex = InActions.IndexOf(RequiredAction);
 						if (DepIndex > ActionIndex)
 						{
 							NumSortErrors++;
@@ -404,16 +413,16 @@ namespace UnrealBuildTool
 						continue;
 					}
 					Action Action = InActions[ActionIndex];
-					foreach (FileItem Item in Action.PrerequisiteItems)
+					foreach (Action RequiredAction in Action.PrerequisiteActions)
 					{
-						if (Item.ProducingAction != null && InActions.Contains(Item.ProducingAction))
+						if (InActions.Contains(RequiredAction))
 						{
-							int DepIndex = InActions.IndexOf(Item.ProducingAction);
+							int DepIndex = InActions.IndexOf(RequiredAction);
 							if (UsedActions.Contains(DepIndex))
 							{
 								continue;
 							}
-							Actions.Add(Item.ProducingAction);
+							Actions.Add(RequiredAction);
 							UsedActions.Add(DepIndex);
 						}
 					}
@@ -423,17 +432,17 @@ namespace UnrealBuildTool
 				for (int ActionIndex = 0; ActionIndex < Actions.Count; ActionIndex++)
 				{
 					Action Action = Actions[ActionIndex];
-					foreach (FileItem Item in Action.PrerequisiteItems)
+					foreach (Action RequiredAction in Action.PrerequisiteActions)
 					{
-						if (Item.ProducingAction != null && Actions.Contains(Item.ProducingAction))
+						if (Actions.Contains(RequiredAction))
 						{
-							int DepIndex = Actions.IndexOf(Item.ProducingAction);
+							int DepIndex = Actions.IndexOf(RequiredAction);
 							if (DepIndex > ActionIndex)
 							{
 								Console.WriteLine("Action is not topologically sorted.");
 								Console.WriteLine("  {0} {1}", Action.CommandPath, Action.CommandArguments);
 								Console.WriteLine("Dependency");
-								Console.WriteLine("  {0} {1}", Item.ProducingAction.CommandPath, Item.ProducingAction.CommandArguments);
+								Console.WriteLine("  {0} {1}", RequiredAction.CommandPath, RequiredAction.CommandArguments);
 								throw new BuildException("Cyclical Dependency in action graph.");
 							}
 						}
@@ -500,7 +509,7 @@ namespace UnrealBuildTool
 				{
 					// If you have XboxOne source access, uncommenting the line below will be better for selecting the appropriate version of the compiler.
 					// Translate the XboxOne compiler to the right Windows compiler to set the VC environment vars correctly...
-					WindowsCompiler windowsCompiler = XboxOnePlatform.GetDefaultCompiler() == XboxOneCompiler.VisualStudio2015 ? WindowsCompiler.VisualStudio2015 : WindowsCompiler.VisualStudio2017;
+					WindowsCompiler windowsCompiler = WindowsCompiler.VisualStudio2017;
 					VCEnv = VCEnvironment.Create(windowsCompiler, CppPlatform.Win64, null, null);
 				}
 			}
@@ -537,7 +546,7 @@ namespace UnrealBuildTool
 
 				switch (VCEnv.Compiler)
 				{
-					case WindowsCompiler.VisualStudio2015:
+					case WindowsCompiler.VisualStudio2019:
 						platformVersionNumber = "140";
 						break;
 
@@ -561,7 +570,7 @@ namespace UnrealBuildTool
 					throw new BuildException(exceptionString);
 				}
 
-				VCToolPath64 = VCEnvironment.GetVCToolPath64(WindowsPlatform.GetDefaultCompiler(null), VCEnv.ToolChainDir).ToString();
+				VCToolPath64 = VCEnv.CompilerPath.ToString();//VCEnvironment.GetVCToolPath64(WindowsPlatform.GetDefaultCompiler(null), VCEnv.ToolChainDir).ToString();
 
 				string debugVCToolPath64 = VCEnv.CompilerPath.Directory.ToString();
 
@@ -602,17 +611,20 @@ namespace UnrealBuildTool
 				AddText(string.Format("\t\t'$Root$/msobj{0}.dll'\n", platformVersionNumber));
 				AddText(string.Format("\t\t'$Root$/mspdb{0}.dll'\n", platformVersionNumber));
 
-				if (VCEnv.Compiler == WindowsCompiler.VisualStudio2015)
+				string RedistFilePath = string.Format("{0}/VC/Auxiliary/Build/Microsoft.VCRedistVersion.default.txt", VCInstallDir.ToString());
+				string RedistVersionNumber = File.ReadAllText(RedistFilePath).TrimEnd('\r', '\n');
+
+				if (VCEnv.Compiler == WindowsCompiler.VisualStudio2019)
 				{
-					AddText(string.Format("\t\t'{0}/VC/redist/x64/Microsoft.VC{1}.CRT/msvcp{2}.dll'\n", VCInstallDir.ToString(), platformVersionNumber, platformVersionNumber));
-					AddText(string.Format("\t\t'{0}/VC/redist/x64/Microsoft.VC{1}.CRT/vccorlib{2}.dll'\n", VCInstallDir.ToString(), platformVersionNumber, platformVersionNumber));
+					AddText(string.Format("\t\t'{0}/VC/Redist/MSVC/{1}/x64/Microsoft.VC142.CRT/msvcp{2}.dll'\n", VCInstallDir.ToString(), RedistVersionNumber, platformVersionNumber));
+					AddText(string.Format("\t\t'{0}/VC/Redist/MSVC/{1}/x64/Microsoft.VC142.CRT/vccorlib{2}.dll'\n", VCInstallDir.ToString(), RedistVersionNumber, platformVersionNumber));
 				}
 				else
 				{
 					//VS 2017 is really confusing in terms of version numbers and paths so these values might need to be modified depending on what version of the tool chain you
 					// chose to install.
-					AddText(string.Format("\t\t'{0}/VC/Redist/MSVC/14.13.26020/x64/Microsoft.VC141.CRT/msvcp{1}.dll'\n", VCInstallDir.ToString(), platformVersionNumber));
-					AddText(string.Format("\t\t'{0}/VC/Redist/MSVC/14.13.26020/x64/Microsoft.VC141.CRT/vccorlib{1}.dll'\n", VCInstallDir.ToString(), platformVersionNumber));
+					AddText(string.Format("\t\t'{0}/VC/Redist/MSVC/{1}/x64/Microsoft.VC141.CRT/msvcp{2}.dll'\n", VCInstallDir.ToString(), RedistVersionNumber, platformVersionNumber));
+					AddText(string.Format("\t\t'{0}/VC/Redist/MSVC/{1}/x64/Microsoft.VC141.CRT/vccorlib{2}.dll'\n", VCInstallDir.ToString(), RedistVersionNumber, platformVersionNumber));
 				}
 
 				AddText("\t}\n"); //End extra files
@@ -669,7 +681,7 @@ namespace UnrealBuildTool
 		private void AddCompileAction(Action Action, int ActionIndex, List<int> DependencyIndices)
 		{
 			string CompilerName = GetCompilerName();
-			if (Action.CommandPath.Contains("rc.exe"))
+			if (Action.CommandPath.FullName.Contains("rc.exe"))
 			{
 				CompilerName = "UE4ResourceCompiler";
 			}
@@ -795,7 +807,7 @@ namespace UnrealBuildTool
 		{
 			Action Action = Actions[ActionIndex];
 			string[] SpecialLinkerOptions = { "/OUT:", "@", "-o" };
-			var ParsedLinkerOptions = ParseCommandLineOptions(Action.CommandArguments, SpecialLinkerOptions, SaveResponseFile: true, SkipInputFile: Action.CommandPath.Contains("orbis-clang"));
+			var ParsedLinkerOptions = ParseCommandLineOptions(Action.CommandArguments, SpecialLinkerOptions, SaveResponseFile: true, SkipInputFile: Action.CommandPath.FullName.Contains("orbis-clang"));
 
 			string OutputFile;
 
@@ -851,7 +863,7 @@ namespace UnrealBuildTool
 				AddText(string.Format("\t.PreBuildDependencies = {{ 'Action_{0}' }} \n", ActionIndex - 1));
 				AddText(string.Format("}}\n\n"));
 			}
-			else if (Action.CommandPath.Contains("lib.exe") || Action.CommandPath.Contains("orbis-snarl"))
+			else if (Action.CommandPath.FullName.Contains("lib.exe") || Action.CommandPath.FullName.Contains("orbis-snarl"))
 			{
 				if (DependencyIndices.Count > 0)
 				{
@@ -925,7 +937,7 @@ namespace UnrealBuildTool
 				AddText(string.Format("\t.LibrarianOutput = '{0}' \n", OutputFile));
 				AddText(string.Format("}}\n\n"));
 			}
-			else if (Action.CommandPath.Contains("link.exe") || Action.CommandPath.Contains("orbis-clang"))
+			else if (Action.CommandPath.FullName.Contains("link.exe") || Action.CommandPath.FullName.Contains("orbis-clang"))
 			{
 				if (DependencyIndices.Count > 0) //Insert a dummy node to make sure all of the dependencies are finished.
 												 //If FASTBuild supports PreBuildDependencies on the Executable action we can remove this.
@@ -1004,15 +1016,12 @@ namespace UnrealBuildTool
 
 					// Resolve dependencies
 					List<int> DependencyIndices = new List<int>();
-					foreach (FileItem Item in Action.PrerequisiteItems)
+					foreach (Action RequiredAction in Action.PrerequisiteActions)
 					{
-						if (Item.ProducingAction != null)
+						int ProducingActionIndex = Actions.IndexOf(RequiredAction);
+						if (ProducingActionIndex >= 0)
 						{
-							int ProducingActionIndex = Actions.IndexOf(Item.ProducingAction);
-							if (ProducingActionIndex >= 0)
-							{
-								DependencyIndices.Add(ProducingActionIndex);
-							}
+							DependencyIndices.Add(ProducingActionIndex);
 						}
 					}
 
@@ -1022,6 +1031,7 @@ namespace UnrealBuildTool
 						case ActionType.Compile: AddCompileAction(Action, ActionIndex, DependencyIndices); ++numFastBuildActions; break;
 						case ActionType.Link: AddLinkAction(Actions, ActionIndex, DependencyIndices); ++numFastBuildActions; break;
 						case ActionType.BuildProject: LocalExecutorActions.Add(Action); break;
+						case ActionType.WriteMetadata: LocalExecutorActions.Add(Action); break;
 						default: Console.WriteLine("Fastbuild is ignoring an unsupported action: " + Action.ActionType.ToString()); break;
 					}
 				}
