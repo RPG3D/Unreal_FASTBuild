@@ -21,14 +21,14 @@ namespace UnrealBuildTool
 		public static string FBuildExePathOverride = @"C:\FASTBuild\FBuild.exe";
 
 		// Controls network build distribution
-		private bool bEnableDistribution = true;
+		private static bool bEnableDistribution = true;
 
 		// Controls whether to use caching at all. CachePath and CacheMode are only relevant if this is enabled.
-		private bool bEnableCaching = false;
+		private static bool bEnableCaching = true;
 
 		// Location of the shared cache, it could be a local or network path (i.e: @"\\DESKTOP-BEAST\FASTBuildCache").
 		// Only relevant if bEnableCaching is true;
-		private string CachePath = @"\\SharedDrive\FASTBuildCache";
+		private static string CachePath = "";
 
 		public enum eCacheMode
 		{
@@ -50,6 +50,11 @@ namespace UnrealBuildTool
 
 		public static bool IsAvailable()
 		{
+			if(bEnableCaching && CachePath.Length < 2)
+			{
+				CachePath = Environment.GetEnvironmentVariable("FASTBUILD_CACHE_PATH");
+			}
+
 			if (FBuildExePathOverride != "")
 			{
 				return File.Exists(FBuildExePathOverride);
@@ -86,14 +91,9 @@ namespace UnrealBuildTool
 						 {"Module.ProxyLODMeshReduction",
 							"GoogleVRController"};
 
-		private enum FBBuildType
-		{
-			Windows,
-			XBOne,
-			PS4
-		}
+		public UnrealTargetPlatform TargetPlatform = UnrealTargetPlatform.Win64;
 
-		private FBBuildType BuildType = FBBuildType.Windows;
+		List<int> LocalExecutedIndex = new List<int>();
 
 		private void DetectBuildType(List<Action> Actions)
 		{
@@ -102,36 +102,31 @@ namespace UnrealBuildTool
 				if (action.ActionType != ActionType.Compile && action.ActionType != ActionType.Link)
 					continue;
 
-				if (action.CommandPath.FullName.Contains("orbis"))
-				{
-					BuildType = FBBuildType.PS4;
-					return;
-				}
+
 				else if (action.CommandArguments.Contains("Intermediate\\Build\\XboxOne"))
 				{
-					BuildType = FBBuildType.XBOne;
+					TargetPlatform = UnrealTargetPlatform.XboxOne;
 					return;
 				}
-				else if (action.CommandPath.FullName.Contains("Microsoft")) //Not a great test.
+				else if (action.CommandPath.FullName.Contains("Windows")) //Not a great test.
 				{
-					BuildType = FBBuildType.Windows;
+					TargetPlatform = UnrealTargetPlatform.Win64;
 					return;
 				}
 			}
 		}
 
-		private bool IsMSVC() { return BuildType == FBBuildType.Windows || BuildType == FBBuildType.XBOne; }
-		private bool IsPS4() { return BuildType == FBBuildType.PS4; }
-		private bool IsXBOnePDBUtil(Action action) { return action.CommandPath.FullName.Contains("XboxOnePDBFileUtil.exe"); }
-		private bool IsPS4SymbolTool(Action action) { return action.CommandPath.FullName.Contains("PS4SymbolTool.exe"); }
+		private bool IsMSVC() { return TargetPlatform == UnrealTargetPlatform.Win64 || TargetPlatform == UnrealTargetPlatform.XboxOne; }
+		private bool IsPS4() { return TargetPlatform == UnrealTargetPlatform.PS4; }
+
 		private string GetCompilerName()
 		{
-			switch (BuildType)
+			switch (TargetPlatform)
 			{
 				default:
-				case FBBuildType.XBOne:
-				case FBBuildType.Windows: return "UE4Compiler";
-				case FBBuildType.PS4: return "UE4PS4Compiler";
+				case UnrealTargetPlatform.XboxOne:
+				case UnrealTargetPlatform.Win64: return "UE4Compiler";
+				//case UnrealTargetPlatform.PS4: return "UE4PS4Compiler";
 			}
 		}
 
@@ -172,23 +167,9 @@ namespace UnrealBuildTool
 			bffOutputFileStream.Write(Info, 0, Info.Length);
 		}
 
-
-		private string SubstituteEnvironmentVariables(string commandLineString)
-		{
-			string outputString = commandLineString.Replace("$(DurangoXDK)", "$DurangoXDK$");
-			outputString = outputString.Replace("$(SCE_ORBIS_SDK_DIR)", "$SCE_ORBIS_SDK_DIR$");
-			outputString = outputString.Replace("$(DXSDK_DIR)", "$DXSDK_DIR$");
-			outputString = outputString.Replace("$(CommonProgramFiles)", "$CommonProgramFiles$");
-
-			return outputString;
-		}
-
 		private Dictionary<string, string> ParseCommandLineOptions(string CompilerCommandLine, string[] SpecialOptions, bool SaveResponseFile = false, bool SkipInputFile = false)
 		{
 			Dictionary<string, string> ParsedCompilerOptions = new Dictionary<string, string>();
-
-			// Make sure we substituted the known environment variables with corresponding BFF friendly imported vars
-			//CompilerCommandLine = SubstituteEnvironmentVariables(CompilerCommandLine);
 
 			// Some tricky defines /DTROUBLE=\"\\\" abc  123\\\"\" aren't handled properly by either Unreal or Fastbuild, but we do our best.
 			char[] SpaceChar = { ' ' };
@@ -211,19 +192,10 @@ namespace UnrealBuildTool
 			{
 				string responseCommandline = RawTokens[RespIndex];
 
-				// If we had spaces inside the response file path, we need to reconstruct the path.
-				//for (int i = 1; i < RawTokens.Length; ++i)
-				//{
-				//	responseCommandline += " " + RawTokens[i];
-				//}
-
 				ResponseFilePath = responseCommandline.Substring(2, responseCommandline.Length - 3); // bit of a bodge to get the @"response.txt" path...
 				try
 				{
 					string ResponseFileText = File.ReadAllText(ResponseFilePath);
-
-					// Make sure we substituted the known environment variables with corresponding BFF friendly imported vars
-					//ResponseFileText = SubstituteEnvironmentVariables(ResponseFileText);
 
 					string[] Separators = { "\n", " ", "\r" };
 					if (File.Exists(ResponseFilePath))
@@ -501,11 +473,11 @@ namespace UnrealBuildTool
 			{
 				// This may fail if the caller emptied PATH; we try to ignore the problem since
 				// it probably means we are building for another platform.
-				if (BuildType == FBBuildType.Windows)
+				if (TargetPlatform == UnrealTargetPlatform.Win64)
 				{
 					VCEnv = VCEnvironment.Create(WindowsPlatform.GetDefaultCompiler(null), CppPlatform.Win64, null, null);
 				}
-				else if (BuildType == FBBuildType.XBOne)
+				else if (TargetPlatform == UnrealTargetPlatform.XboxOne)
 				{
 					// If you have XboxOne source access, uncommenting the line below will be better for selecting the appropriate version of the compiler.
 					// Translate the XboxOne compiler to the right Windows compiler to set the VC environment vars correctly...
@@ -809,24 +781,13 @@ namespace UnrealBuildTool
 			string[] SpecialLinkerOptions = { "/OUT:", "@", "-o" };
 			var ParsedLinkerOptions = ParseCommandLineOptions(Action.CommandArguments, SpecialLinkerOptions, SaveResponseFile: true, SkipInputFile: Action.CommandPath.FullName.Contains("orbis-clang"));
 
-			string OutputFile;
+			string OutputFile = "";
 
-			if (IsXBOnePDBUtil(Action))
-			{
-				OutputFile = ParsedLinkerOptions["OtherOptions"].Trim(' ').Trim('"');
-			}
-			else if (IsMSVC())
+			if (IsMSVC())
 			{
 				OutputFile = GetOptionValue(ParsedLinkerOptions, "/OUT:", Action, ProblemIfNotFound: true);
 			}
-			else //PS4
-			{
-				OutputFile = GetOptionValue(ParsedLinkerOptions, "-o", Action, ProblemIfNotFound: false);
-				if (string.IsNullOrEmpty(OutputFile))
-				{
-					OutputFile = GetOptionValue(ParsedLinkerOptions, "InputFile", Action, ProblemIfNotFound: true);
-				}
-			}
+
 
 			if (string.IsNullOrEmpty(OutputFile))
 			{
@@ -839,31 +800,7 @@ namespace UnrealBuildTool
 
 			List<int> PrebuildDependencies = new List<int>();
 
-			if (IsXBOnePDBUtil(Action))
-			{
-				AddText(string.Format("Exec('Action_{0}')\n{{\n", ActionIndex));
-				AddText(string.Format("\t.ExecExecutable = '{0}'\n", Action.CommandPath));
-				AddText(string.Format("\t.ExecArguments = '{0}'\n", Action.CommandArguments));
-				AddText(string.Format("\t.ExecInput = {{ {0} }} \n", ParsedLinkerOptions["InputFile"]));
-				AddText(string.Format("\t.ExecOutput = '{0}' \n", OutputFile));
-				AddText(string.Format("\t.PreBuildDependencies = {{ {0} }} \n", ParsedLinkerOptions["InputFile"]));
-				AddText(string.Format("}}\n\n"));
-			}
-			else if (IsPS4SymbolTool(Action))
-			{
-				string searchString = "-map=\"";
-				int execArgumentStart = Action.CommandArguments.LastIndexOf(searchString) + searchString.Length;
-				int execArgumentEnd = Action.CommandArguments.IndexOf("\"", execArgumentStart);
-				string ExecOutput = Action.CommandArguments.Substring(execArgumentStart, execArgumentEnd - execArgumentStart);
-
-				AddText(string.Format("Exec('Action_{0}')\n{{\n", ActionIndex));
-				AddText(string.Format("\t.ExecExecutable = '{0}'\n", Action.CommandPath));
-				AddText(string.Format("\t.ExecArguments = '{0}'\n", Action.CommandArguments));
-				AddText(string.Format("\t.ExecOutput = '{0}'\n", ExecOutput));
-				AddText(string.Format("\t.PreBuildDependencies = {{ 'Action_{0}' }} \n", ActionIndex - 1));
-				AddText(string.Format("}}\n\n"));
-			}
-			else if (Action.CommandPath.FullName.Contains("lib.exe") || Action.CommandPath.FullName.Contains("orbis-snarl"))
+			if (Action.CommandPath.FullName.EndsWith("lib.exe") || Action.CommandPath.FullName.Contains("orbis-snarl"))
 			{
 				if (DependencyIndices.Count > 0)
 				{
@@ -960,7 +897,7 @@ namespace UnrealBuildTool
 					AddText(string.Format("\t.Libraries = {{ '{0}' }} \n", ResponseFilePath));
 					if (IsMSVC())
 					{
-						if (BuildType == FBBuildType.XBOne)
+						if (TargetPlatform == UnrealTargetPlatform.XboxOne)
 						{
 							AddText(string.Format("\t.LinkerOptions = '/TLBOUT:\"%1\" /Out:\"%2\" @\"{0}\" {1} ' \n", ResponseFilePath, OtherCompilerOptions)); // The TLBOUT is a huge bodge to consume the %1.
 						}
@@ -978,7 +915,7 @@ namespace UnrealBuildTool
 					AddText(string.Format("\t.Libraries = 'Action_{0}_dummy' \n", ActionIndex));
 					if (IsMSVC())
 					{
-						if (BuildType == FBBuildType.XBOne)
+						if (TargetPlatform == UnrealTargetPlatform.XboxOne)
 						{
 							AddText(string.Format("\t.LinkerOptions = '/TLBOUT:\"%1\" /Out:\"%2\" @\"{0}\" {1} ' \n", ResponseFilePath, OtherCompilerOptions)); // The TLBOUT is a huge bodge to consume the %1.
 						}
@@ -1028,11 +965,25 @@ namespace UnrealBuildTool
 					AddText(string.Format("// \"{0}\" {1}\n", Action.CommandPath, Action.CommandArguments));
 					switch (Action.ActionType)
 					{
-						case ActionType.Compile: AddCompileAction(Action, ActionIndex, DependencyIndices); ++numFastBuildActions; break;
-						case ActionType.Link: AddLinkAction(Actions, ActionIndex, DependencyIndices); ++numFastBuildActions; break;
-						case ActionType.BuildProject: LocalExecutorActions.Add(Action); break;
-						case ActionType.WriteMetadata: LocalExecutorActions.Add(Action); break;
-						default: Console.WriteLine("Fastbuild is ignoring an unsupported action: " + Action.ActionType.ToString()); break;
+						case ActionType.Compile:
+							AddCompileAction(Action, ActionIndex, DependencyIndices); ++numFastBuildActions;
+							break;
+
+						case ActionType.Link:
+							AddLinkAction(Actions, ActionIndex, DependencyIndices); ++numFastBuildActions;
+							break;
+
+						case ActionType.BuildProject:
+						case ActionType.PostBuildStep:
+						case ActionType.WriteMetadata:
+							LocalExecutorActions.Add(Action);
+							Console.WriteLine("Action will be executed on local:" + ActionIndex.ToString() + "\t" + Action.CommandArguments);
+							LocalExecutedIndex.Add(ActionIndex);
+							break;
+
+						default:
+							Console.WriteLine("Fastbuild is ignoring an unsupported action: " + Action.ActionType.ToString() + "\tActionIndex:" + ActionIndex.ToString());
+							break;
 					}
 				}
 
@@ -1040,7 +991,10 @@ namespace UnrealBuildTool
 				AddText("\t.Targets = { \n");
 				for (int ActionIndex = 0; ActionIndex < numFastBuildActions; ActionIndex++)
 				{
-					AddText(string.Format("\t\t'Action_{0}'{1}", ActionIndex, ActionIndex < (numFastBuildActions - 1) ? ",\n" : "\n\t}\n"));
+					if(LocalExecutedIndex.Contains(ActionIndex) == false)
+					{
+						AddText(string.Format("\t\t'Action_{0}'{1}", ActionIndex, ActionIndex < (numFastBuildActions - 1) ? ",\n" : "\n\t}\n"));
+					}
 				}
 				AddText("}\n");
 
